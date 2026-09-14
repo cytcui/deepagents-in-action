@@ -49,9 +49,27 @@ read_result = agent.invoke(
         "files": result["files"],
         "messages": [
             HumanMessage(
+                # content=(
+                #     "请调用 read_file 读取 /workspace/context-demo.md，"
+                #     "然后原样输出文件的第二行。"
+                # )
+
+                # content=(
+                #     "请调用 read_file 读取 /workspace/context-demo.md，"
+                #     "参数必须使用 offset=1、limit=1。"
+                #     "只输出读取到的这一行。"
+                # )
+
+                # content=(
+                #     "请调用 grep，在 /workspace/ 目录下搜索 StoreBackend，"
+                #     "使用 output_mode='content'。"
+                #     "根据搜索返回，告诉我它在哪个文件、哪一行，以及该行内容。"
+                # )
+
                 content=(
-                    "请调用 read_file 读取 /workspace/context-demo.md，"
-                    "然后原样输出文件的第二行。"
+                    "请先调用 glob，列出 /workspace/ 及其子目录中的 Markdown 文件。"
+                    "再调用 grep，只在这些 Markdown 文件中搜索 StoreBackend，"
+                    "使用 output_mode='content'，并报告结果。"
                 )
             )
         ],
