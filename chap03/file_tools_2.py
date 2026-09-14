@@ -1,8 +1,10 @@
 import os
 from itertools import count
 
+from cryptography.hazmat.backends.openssl import backend
 from deepagents import create_deep_agent
 from deepagents.backends import StateBackend
+from deepagents.middleware import SummarizationMiddleware
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
@@ -10,8 +12,9 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 load_dotenv()
 
+file_backend = StateBackend()
+
 llm = ChatOpenAI(
-    temperature=0,
     model_name=os.getenv("MODEL_NAME")
 )
 
@@ -30,22 +33,21 @@ def get_long_report() -> str:
     print("工具内部生成的报告字符数：", len(report))
     return report
 
+
 agent = create_deep_agent(
     model=llm,
     tools=[get_long_report],
-    backend=StateBackend(),
+    backend=file_backend,
     checkpointer=InMemorySaver(),
-    system_prompt="""
-    你是文件工具实验助手。
-
-根据用户本轮提问操作文件，有依赖的操作必须按顺序执行：
-- 每条 AI 消息最多发起一个工具调用。
-- 收到该工具的返回结果后，才能发起下一次调用。
-- 编辑文件前必须先成功读取文件。
-- 如果工具返回错误，停止本轮后续操作并报告实际错误。
-- 不调用 task，不委派子 Agent。
-- 最终报告必须依据工具返回，不能把计划当成执行结果。
-""",
+    middleware=[
+        SummarizationMiddleware(
+            model=llm,
+            backend=file_backend,
+            trigger=("messages", 6),
+            keep=("messages", 2),
+        )
+    ],
+    system_prompt="你是学习助手，每次用一句话回答，不调用工具。",
 )
 
 config = {"configurable": {"thread_id": "chapter03-file-tools"}}
@@ -86,6 +88,3 @@ for turn in count(1):
 
     print("助手：", result["messages"][-1].content)
     print("当前文件列表：", list(result.get("files", {})))
-
-
-

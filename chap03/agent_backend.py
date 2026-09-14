@@ -2,11 +2,14 @@ import os
 from itertools import count
 
 from deepagents import create_deep_agent
-from deepagents.backends import StateBackend
+from deepagents.backends import FilesystemBackend, LocalShellBackend, CompositeBackend, StateBackend, StoreBackend
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.store.memory import InMemoryStore
+from deepagents import FilesystemPermission
+
 
 load_dotenv()
 
@@ -15,40 +18,55 @@ llm = ChatOpenAI(
     model_name=os.getenv("MODEL_NAME")
 )
 
+files = FilesystemBackend(
+    root_dir="./agent-workspace",
+    virtual_mode=True,
+)
 
-def get_long_report() -> str:
-    """返回一份模拟长报告，用于观察工具结果自动卸载。"""
-    lines = [
-        f"{i:04d}: Virtual filesystems help agents retrieve information on demand."
-        for i in range(1, 3001)
-    ]
+shell = LocalShellBackend(
+    root_dir="./agent-workspace",
+    virtual_mode=True,
+)
 
-    # 在报告中间放入一条可供后续检索的结论。
-    lines[1499] = "1500: 关键结论：仅在需要时读取相关片段。"
+file_backend = CompositeBackend(
+    default=StateBackend(),
+    routes={
+        "/memories/": StoreBackend(
+            namespace=lambda runtime: ("cuiyt",),
+        ),
+    },
+)
 
-    report = "\n".join(lines)
-    print("工具内部生成的报告字符数：", len(report))
-    return report
+store = InMemoryStore()
 
 agent = create_deep_agent(
     model=llm,
-    tools=[get_long_report],
-    backend=StateBackend(),
+    backend=file_backend,
+    store=store,
     checkpointer=InMemorySaver(),
     system_prompt="""
     你是文件工具实验助手。
+    """,
+    permissions=[
+        # 具体例外放在前面：这个文件可以写。
+        FilesystemPermission(
+            operations=["write"],
+            paths=["/memories/scratch.md"],
+            mode="allow",
+        ),
 
-根据用户本轮提问操作文件，有依赖的操作必须按顺序执行：
-- 每条 AI 消息最多发起一个工具调用。
-- 收到该工具的返回结果后，才能发起下一次调用。
-- 编辑文件前必须先成功读取文件。
-- 如果工具返回错误，停止本轮后续操作并报告实际错误。
-- 不调用 task，不委派子 Agent。
-- 最终报告必须依据工具返回，不能把计划当成执行结果。
-""",
+        # 其余 memories 文件禁止写入、编辑和删除。
+        FilesystemPermission(
+            operations=["write"],
+            paths=["/memories/**"],
+            mode="deny",
+        ),
+    ],
 )
 
-config = {"configurable": {"thread_id": "chapter03-file-tools"}}
+config = {"configurable": {"thread_id": "A"}}
+
+
 seen_message_ids: set[str] = set()
 
 print("文件工具问答实验：输入 exit、quit 或 退出 结束。")
@@ -65,6 +83,12 @@ for turn in count(1):
         print("已结束问答。")
         break
     if not question:
+        continue
+
+    if question.startswith("/thread "):
+        thread_id = question.split(maxsplit=1)[1]
+        config["configurable"]["thread_id"] = thread_id
+        print("已切换线程：", thread_id)
         continue
 
     # 只传入本轮新消息；Checkpointer 按 thread_id 恢复历史消息和文件。
@@ -86,6 +110,4 @@ for turn in count(1):
 
     print("助手：", result["messages"][-1].content)
     print("当前文件列表：", list(result.get("files", {})))
-
-
 
